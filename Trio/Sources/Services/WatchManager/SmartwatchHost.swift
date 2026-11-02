@@ -78,6 +78,8 @@ final class BaseSmartwatchHost: SmartwatchHost, Injectable {
     @MainActor private var bolusContextIssuer = SmartwatchBolusContextIssuer()
     /// Carb entries from the watch that the latest determination may not count yet.
     @MainActor private var watchCarbEntries: [WatchCarbEntry] = []
+    /// Glucose alerts the plugin restored from before a relaunch that Trio doesn't issue again.
+    @MainActor private var restoredAlerts = RestoredWatchAlerts(launchedAt: Date())
 
     private(set) var smartwatchManager: SmartwatchManagerUI? {
         didSet {
@@ -174,7 +176,12 @@ final class BaseSmartwatchHost: SmartwatchHost, Injectable {
     private func subscribeToUpdates() {
         glucoseStorage.updatePublisher
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in MainActor.assumeIsolated { self?.update() } }
+            .sink { [weak self] _ in
+                MainActor.assumeIsolated {
+                    self?.update()
+                    self?.clearRestoredAlertsIfDue()
+                }
+            }
             .store(in: &subscriptions)
 
         CoreDataStack.shared.entityChangePublisher
@@ -578,6 +585,65 @@ extension BaseSmartwatchHost: SettingsObserver {
     }
 }
 
+// MARK: - Restored watch alerts
+
+extension BaseSmartwatchHost {
+    /// When to clear glucose alerts the plugin restored from before a relaunch.
+    /// Trio keeps which alarms are firing in memory only: after a relaunch it
+    /// issues an alarm that still applies again once its launch quiet window is
+    /// over, but never retracts one that ended while it wasn't running. So the
+    /// host waits for a glucose update after the quiet window, and one at least a
+    /// minute after that, then retracts every glucose alarm it hasn't forwarded
+    /// since launch. The plugin ignores alerts it doesn't have.
+    struct RestoredWatchAlerts {
+        /// `GlucoseAlertCoordinator`'s launch quiet window.
+        static let launchQuietWindow: TimeInterval = 30
+        /// Time Trio gets after its first update to issue again what still applies.
+        static let reissueTime: TimeInterval = 60
+
+        let launchedAt: Date
+        /// Glucose alerts forwarded since launch and not retracted.
+        var forwarded: Set<String> = []
+        private(set) var isCleared = false
+        private var firstUpdateAfterQuietWindow: Date?
+
+        init(launchedAt: Date) {
+            self.launchedAt = launchedAt
+        }
+
+        /// Called on each glucose update; true once, when it's time to clear.
+        mutating func glucoseDidUpdate(at now: Date) -> Bool {
+            guard !isCleared, now.timeIntervalSince(launchedAt) >= Self.launchQuietWindow else { return false }
+            guard let first = firstUpdateAfterQuietWindow else {
+                firstUpdateAfterQuietWindow = now
+                return false
+            }
+            guard now.timeIntervalSince(first) >= Self.reissueTime else { return false }
+            isCleared = true
+            return true
+        }
+
+        /// Of the glucose alarms' alerts, those to retract: the ones not forwarded since launch.
+        func toRetract(alarmAlerts: [String]) -> [String] {
+            alarmAlerts.filter { !forwarded.contains($0) }
+        }
+    }
+
+    @MainActor private func clearRestoredAlertsIfDue() {
+        guard let manager = smartwatchManager,
+              type(of: manager).capabilities.contains(.alerts),
+              restoredAlerts.glucoseDidUpdate(at: Date())
+        else { return }
+        let alarmAlerts = GlucoseAlertsStore.shared.alerts
+            .map { GlucoseAlertCoordinator.alertID(for: $0) }
+            .filter { Self.glucoseAlertType(of: $0) != nil }
+            .map(\.value)
+        for identifier in restoredAlerts.toRetract(alarmAlerts: alarmAlerts) {
+            manager.watchAlertDidRetract(SmartwatchAlertIdentifier(identifier))
+        }
+    }
+}
+
 // MARK: - TrioAlertForwarder
 
 extension BaseSmartwatchHost: TrioAlertForwarder {
@@ -623,7 +689,10 @@ extension BaseSmartwatchHost: TrioAlertForwarder {
             issuedAt: Date(),
             glucoseAlertType: glucoseAlertType
         )
-        Task { @MainActor in manager.watchAlertDidIssue(watchAlert) }
+        Task { @MainActor in
+            self.restoredAlerts.forwarded.insert(watchAlert.identifier.value)
+            manager.watchAlertDidIssue(watchAlert)
+        }
     }
 
     func alertManager(didRetract identifier: Alert.Identifier) {
@@ -631,7 +700,10 @@ extension BaseSmartwatchHost: TrioAlertForwarder {
               type(of: manager).capabilities.contains(.alerts),
               Self.glucoseAlertType(of: identifier) != nil
         else { return }
-        Task { @MainActor in manager.watchAlertDidRetract(SmartwatchAlertIdentifier(identifier.value)) }
+        Task { @MainActor in
+            self.restoredAlerts.forwarded.remove(identifier.value)
+            manager.watchAlertDidRetract(SmartwatchAlertIdentifier(identifier.value))
+        }
     }
 }
 

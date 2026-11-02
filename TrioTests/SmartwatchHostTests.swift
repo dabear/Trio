@@ -44,6 +44,29 @@ import Testing
         #expect(BaseSmartwatchHost.uncountedWatchCarbs([old], determinationDate: nil, now: now).isEmpty)
     }
 
+    @Test("Restored watch alerts are cleared once, after Trio has had time to issue them again") func restoredAlertsTiming() {
+        let launch = Date()
+        var restored = BaseSmartwatchHost.RestoredWatchAlerts(launchedAt: launch)
+        // Inside Trio's launch quiet window nothing is issued again yet. The first
+        // update after it is when Trio issues again what still applies; clearing
+        // waits a minute past that update, and happens once per launch.
+        let clearedAt = [10, 40, 70, 100, 400].map { seconds in
+            restored.glucoseDidUpdate(at: launch.addingTimeInterval(TimeInterval(seconds)))
+        }
+        #expect(clearedAt == [false, false, false, true, false])
+        #expect(restored.isCleared)
+    }
+
+    @Test("Only glucose alarms not forwarded since launch are retracted") func restoredAlertsToRetract() {
+        var restored = BaseSmartwatchHost.RestoredWatchAlerts(launchedAt: Date())
+        let high = "Trio.glucose.high.\(UUID().uuidString)"
+        let low = "Trio.glucose.low.\(UUID().uuidString)"
+        restored.forwarded.insert(high)
+        #expect(restored.toRetract(alarmAlerts: [high, low]) == [low])
+        restored.forwarded.remove(high)
+        #expect(restored.toRetract(alarmAlerts: [high, low]) == [high, low])
+    }
+
     @Test("Trend arrows match LoopKit's GlucoseTrend") func trends() {
         #expect(BloodGlucose.Direction.tripleUp.smartwatchTrend == .upUpUp)
         #expect(BloodGlucose.Direction.doubleUp.smartwatchTrend == .upUpUp)
