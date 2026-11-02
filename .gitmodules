@@ -56,4 +56,4 @@
 [submodule "LupedSmartwatchKit"]
 	path = LupedSmartwatchKit
 	url = https://github.com/dabear/LupedSmartwatchKit.git
-	branch = smartwatch-manager
+	branch = smartwatch-manager-review
