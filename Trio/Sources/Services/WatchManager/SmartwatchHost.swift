@@ -750,11 +750,71 @@ extension BaseSmartwatchHost: SmartwatchManagerDelegate {
         try await handleBolusRequest(request, from: manager)
     }
 
+    /// What Trio would recommend with the carbs the user is about to add from the
+    /// watch (0 for none), without adding them: Trio's bolus calculator, as for
+    /// its Apple Watch app, with those carbs and any watch carbs no determination
+    /// has counted yet. Only while boluses from the watch are allowed and glucose
+    /// is recent; the bolus itself is checked again after the carbs are added.
+    func smartwatchManager(
+        _ manager: SmartwatchManager,
+        recommendBolusFor request: SmartwatchBolusRecommendationRequest
+    ) async throws -> SmartwatchBolusRecommendation {
+        try await handleBolusRecommendationRequest(request, from: manager)
+    }
+
+    @MainActor private func handleBolusRecommendationRequest(
+        _ request: SmartwatchBolusRecommendationRequest,
+        from manager: SmartwatchManager
+    ) async throws -> SmartwatchBolusRecommendation {
+        let grams = request.grams
+        log(manager, .receive, String(format: "Bolus recommendation request with %.0f g of carbs", grams))
+        if let refusal = refusal(for: manager, capability: .remoteBolus, isAllowed: UserDefaults.standard.allowSmartwatchBolus) {
+            log(manager, .error, "Bolus recommendation refused: \(refusal)")
+            throw SmartwatchBolusError.notAllowed
+        }
+        let maximumGlucoseAge = manager.remoteActionLimits.bolusPolicyLimits.maximumGlucoseAge
+        guard (try? await fetchReadings(since: Date().addingTimeInterval(-maximumGlucoseAge)).last) != nil else {
+            log(manager, .error, "Bolus recommendation refused: no glucose in the last \(Int(maximumGlucoseAge / 60)) minutes")
+            throw SmartwatchBolusError.noRecentGlucose
+        }
+        let maximumGrams = Double(truncating: settingsManager.settings.maxCarbs as NSNumber)
+        guard grams.isFinite, grams >= 0, grams <= maximumGrams else {
+            log(manager, .error, String(
+                format: "Bolus recommendation refused: %.0f g isn't a valid carb entry (Max Carbs %.0f g)",
+                grams,
+                maximumGrams
+            ))
+            throw SmartwatchBolusError.invalidAmount
+        }
+        let determination = (try? await latestDetermination()) ?? nil
+        watchCarbEntries = Self.uncountedWatchCarbs(watchCarbEntries, determinationDate: determination?.timestamp, now: Date())
+        let result = await bolusCalculationManager.handleBolusCalculation(
+            carbs: Decimal(watchCarbEntries.reduce(0) { $0 + $1.grams } + grams),
+            useFattyMealCorrection: false,
+            useSuperBolus: false,
+            lastLoopDate: apsManager.lastLoopDate,
+            minPredBG: determination?.minPredBG ?? 54,
+            simulatedCOB: nil,
+            isBackdated: false
+        )
+        // Rounded as the bolus check rounds the recommendation it caps at.
+        let recommended = max(0, Double(truncating: result.insulinCalculated as NSNumber))
+        let units = deviceDataManager.pumpManager?.roundToSupportedBolusVolume(units: recommended) ?? recommended
+        let maximumBolus = Double(truncating: settingsManager.pumpSettings.maxBolus as NSNumber)
+        log(manager, .delegateResponse, String(
+            format: "Bolus recommendation with %.0f g of carbs: %.2f U (Max Bolus %.2f U)",
+            grams,
+            units,
+            maximumBolus
+        ))
+        return SmartwatchBolusRecommendation(units: units, grams: grams, maximumBolus: maximumBolus, issuedAt: Date())
+    }
+
     /// The longest mute a watch can ask for.
     static let maximumMuteDuration: TimeInterval = 4 * 60 * 60
 
-    /// Snoozes Trio's alerts like every other snooze surface, for at most 4 hours.
-    /// Critical alerts still sound, as for any snooze.
+    /// Snoozes Trio's alerts like every other snooze surface, for at most 4 hours;
+    /// a duration of 0 ends the snooze. Critical alerts still sound, as for any snooze.
     func smartwatchManager(
         _ manager: SmartwatchManager,
         requestAlertMute request: SmartwatchAlertMuteRequest
@@ -776,9 +836,14 @@ extension BaseSmartwatchHost: SmartwatchManagerDelegate {
             )
             throw SmartwatchAlertMuteError.expiredRequest
         }
-        guard duration.isFinite, duration > 0 else {
+        guard duration.isFinite, duration >= 0 else {
             log(manager, .error, "Mute request rejected: invalid duration")
             throw SmartwatchAlertMuteError.notAllowed
+        }
+        if duration == 0 {
+            await trioAlertManager.applySnooze(for: 0)
+            log(manager, .delegateResponse, "Snooze ended from the watch")
+            return Date()
         }
         let muteDuration = min(duration, Self.maximumMuteDuration)
         await trioAlertManager.applySnooze(for: muteDuration)
@@ -798,6 +863,9 @@ extension BaseSmartwatchHost: SmartwatchManagerDelegate {
             manager,
             .receive,
             String(format: "Carb entry request: %.0f g, confirmed at %@", grams, String(describing: request.requestedAt))
+                // Trio's carb model has no per-entry absorption time, so a watch's
+                // fast, medium or slow is only logged.
+                + (request.absorption.map { ", \($0.rawValue) absorption (not used by Trio)" } ?? "")
         )
         let refusal = refusal(for: manager, capability: .remoteCarbs, isAllowed: UserDefaults.standard.allowSmartwatchCarbs)
         let maxCarbs = Double(truncating: settingsManager.settings.maxCarbs as NSNumber)
