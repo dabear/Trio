@@ -55,4 +55,7 @@
    <FileRef
       location = "group:LupedSmartwatchKit/LupedSmartwatchKit.xcodeproj">
    </FileRef>
+   <FileRef
+      location = "group:GarminSmartwatchKit/GarminSmartwatchKit.xcodeproj">
+   </FileRef>
 </Workspace>
