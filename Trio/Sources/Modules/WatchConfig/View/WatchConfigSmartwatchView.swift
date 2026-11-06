@@ -1,3 +1,4 @@
+import LoopKit
 import LoopKitUI
 import SwiftUI
 import Swinject
@@ -16,12 +17,13 @@ enum SmartwatchSheet: Identifiable {
     }
 }
 
-/// Rows on the Watch screen for watch plugins (such as Pebble): one per
-/// available plugin until a watch is added, then the added watch, which opens
-/// the plugin's own settings. The screen presents `sheet` (`smartwatchSheets`):
-/// these rows are several list rows, and a sheet attached to them would be
+/// The Watch screen's sections for watches other than Apple Watch (watch
+/// plugins such as Pebble): one row per available plugin until a watch is
+/// added, then the added watch, which opens the plugin's own settings, and
+/// what it may ask Trio to do. The screen presents `sheet` (`smartwatchSheets`):
+/// these are several list rows, and a sheet attached to them would be
 /// attached to each, so a tap would present it more than once and close it.
-struct WatchConfigSmartwatchRows: View {
+struct WatchConfigSmartwatchSections: View {
     let resolver: Resolver
     @Binding var sheet: SmartwatchSheet?
 
@@ -33,14 +35,61 @@ struct WatchConfigSmartwatchRows: View {
 
     private var host: SmartwatchHost { resolver.resolve(SmartwatchHost.self)! }
 
+    /// The remote actions the watch may ask for, one toggle each.
+    private static let remoteCapabilities: SmartwatchCapabilities = [
+        .remoteMute,
+        .remoteCarbs,
+        .remoteBolus,
+        .remoteOverride,
+        .remoteTempTarget
+    ]
+
     var body: some View {
-        Group {
-            if let manager = host.smartwatchManager {
+        let manager = host.smartwatchManager
+        Section(
+            header: Text(String(
+                localized: "Third-Party Smartwatch",
+                comment: "Watch screen: header of the section for watches other than Apple Watch"
+            )),
+            footer: Text(
+                manager == nil
+                    ? String(
+                        localized: "Add a watch other than Apple Watch here. Apple Watch uses Trio's own watch app, above.",
+                        comment: "Watch screen: footer while no third-party watch is added"
+                    )
+                    : String(
+                        localized: "A watch other than Apple Watch: it shows your glucose and Trio's glucose alerts.",
+                        comment: "Watch screen: footer once a third-party watch is added"
+                    )
+            )
+        ) {
+            if let manager {
                 Button { sheet = .settings } label: {
                     row(title: manager.localizedTitle, image: manager.smallImage)
                 }
-                // Only for a watch that offers the action; off by default and
-                // turned off when the watch is removed or replaced.
+            } else {
+                ForEach(host.availableSmartwatchManagers, id: \.identifier) { descriptor in
+                    Button { sheet = .setup(identifier: descriptor.identifier) } label: {
+                        row(title: descriptor.localizedTitle, image: descriptor.image, subtitle: descriptor.subtitle)
+                    }
+                }
+            }
+        }
+        .listRowBackground(Color.chart)
+
+        // Only for a watch that offers an action; each is off by default and
+        // turned off when the watch is removed or replaced.
+        if let manager, !manager.effectiveCapabilities.isDisjoint(with: Self.remoteCapabilities) {
+            Section(
+                header: Text(String(
+                    localized: "Third-Party Smartwatch Permissions",
+                    comment: "Watch screen: header above what a third-party watch may ask Trio to do"
+                )),
+                footer: Text(String(
+                    localized: "What the watch may ask Trio to do. Each is off until you turn it on, and Trio checks every request.",
+                    comment: "Watch screen: footer of the third-party watch permissions"
+                ))
+            ) {
                 if manager.effectiveCapabilities.contains(.remoteMute) {
                     Toggle(String(localized: "Allow Snooze from Watch"), isOn: $allowMute)
                 }
@@ -56,13 +105,8 @@ struct WatchConfigSmartwatchRows: View {
                 if manager.effectiveCapabilities.contains(.remoteTempTarget) {
                     Toggle(String(localized: "Allow Temp Targets from Watch"), isOn: $allowTempTargets)
                 }
-            } else {
-                ForEach(host.availableSmartwatchManagers, id: \.identifier) { descriptor in
-                    Button { sheet = .setup(identifier: descriptor.identifier) } label: {
-                        row(title: descriptor.localizedTitle, image: descriptor.image, subtitle: descriptor.subtitle)
-                    }
-                }
             }
+            .listRowBackground(Color.chart)
         }
     }
 

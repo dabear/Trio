@@ -18,11 +18,11 @@ extension WatchConfig {
                     content: {
                         NavigationLink("Apple Watch", destination: WatchConfigAppleWatchView(resolver: resolver, state: state))
                         NavigationLink("Garmin", destination: WatchConfigGarminView(state: state))
-                        // Rebuilt when a watch is added or removed.
-                        WatchConfigSmartwatchRows(resolver: resolver, sheet: $smartwatchSheet)
-                            .id(smartwatchRevision)
                     }
                 ).listRowBackground(Color.chart)
+                // Rebuilt when a watch is added or removed.
+                WatchConfigSmartwatchSections(resolver: resolver, sheet: $smartwatchSheet)
+                    .id(smartwatchRevision)
             }
             .smartwatchSheets(resolver: resolver, sheet: $smartwatchSheet, revision: $smartwatchRevision)
             .scrollContentBackground(.hidden).background(appState.trioBackgroundColor(for: colorScheme))
