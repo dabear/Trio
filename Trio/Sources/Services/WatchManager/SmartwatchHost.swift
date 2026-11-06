@@ -1,6 +1,8 @@
 import Combine
 import CoreData
 import Foundation
+import GarminSmartwatchKit
+import GarminSmartwatchKitUI
 import LoopKit
 import LoopKitUI
 import LupedSmartwatchKit
@@ -22,6 +24,16 @@ struct SmartwatchPlugin {
                 subtitle: "Pebble Time 2 and Pebble Round 2",
                 manufacturer: "Core Devices",
                 image: LupedSmartwatchManager.onboardingImage
+            )
+        ),
+        SmartwatchPlugin(
+            managerType: GarminSmartwatchManager.self,
+            descriptor: SmartwatchManagerDescriptor(
+                identifier: GarminSmartwatchManager.pluginIdentifier,
+                localizedTitle: GarminSmartwatchManager.localizedTitle,
+                subtitle: "Experimental: Connect IQ watchfaces, watch apps and datafields",
+                manufacturer: "Garmin",
+                image: GarminSmartwatchManager.onboardingImage
             )
         )
     ]
