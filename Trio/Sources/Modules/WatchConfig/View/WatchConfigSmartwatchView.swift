@@ -3,14 +3,28 @@ import SwiftUI
 import Swinject
 import UIKit
 
+/// A watch plugin's setup or settings, shown over the Watch screen.
+enum SmartwatchSheet: Identifiable {
+    case setup(identifier: String)
+    case settings
+
+    var id: String {
+        switch self {
+        case let .setup(identifier): "setup-\(identifier)"
+        case .settings: "settings"
+        }
+    }
+}
+
 /// Rows on the Watch screen for watch plugins (such as Pebble): one per
 /// available plugin until a watch is added, then the added watch, which opens
-/// the plugin's own settings.
+/// the plugin's own settings. The screen presents `sheet` (`smartwatchSheets`):
+/// these rows are several list rows, and a sheet attached to them would be
+/// attached to each, so a tap would present it more than once and close it.
 struct WatchConfigSmartwatchRows: View {
     let resolver: Resolver
+    @Binding var sheet: SmartwatchSheet?
 
-    @State private var sheet: Sheet?
-    @State private var revision = 0
     @AppStorage(UserDefaults.allowSmartwatchOverridesKey) private var allowOverrides = false
     @AppStorage(UserDefaults.allowSmartwatchTempTargetsKey) private var allowTempTargets = false
     @AppStorage(UserDefaults.allowSmartwatchMuteKey) private var allowMute = false
@@ -18,18 +32,6 @@ struct WatchConfigSmartwatchRows: View {
     @AppStorage(UserDefaults.allowSmartwatchBolusKey) private var allowBolus = false
 
     private var host: SmartwatchHost { resolver.resolve(SmartwatchHost.self)! }
-
-    private enum Sheet: Identifiable {
-        case setup(identifier: String)
-        case settings
-
-        var id: String {
-            switch self {
-            case let .setup(identifier): "setup-\(identifier)"
-            case .settings: "settings"
-            }
-        }
-    }
 
     var body: some View {
         Group {
@@ -62,25 +64,6 @@ struct WatchConfigSmartwatchRows: View {
                 }
             }
         }
-        // Re-render when a watch is added or removed.
-        .id(revision)
-        .sheet(item: $sheet) { sheet in
-            SmartwatchViewControllerView { completionDelegate in
-                switch sheet {
-                case let .setup(identifier):
-                    host.setupViewController(for: identifier, completionDelegate: completionDelegate)
-                case .settings:
-                    host.settingsViewController(completionDelegate: completionDelegate)
-                }
-            } onComplete: {
-                self.sheet = nil
-            }
-            .ignoresSafeArea()
-            .interactiveDismissDisabled()
-        }
-        .onReceive(host.smartwatchManagerChanged.receive(on: DispatchQueue.main)) { _ in
-            revision += 1
-        }
     }
 
     private func row(title: String, image: UIImage?, subtitle: String? = nil) -> some View {
@@ -102,6 +85,32 @@ struct WatchConfigSmartwatchRows: View {
                 .font(.footnote.weight(.semibold))
                 .foregroundColor(.secondary)
         }
+    }
+}
+
+extension View {
+    /// Presents the watch plugin's setup or settings for `sheet`, once for the
+    /// whole screen, and counts `revision` up when a watch is added or removed.
+    func smartwatchSheets(resolver: Resolver, sheet: Binding<SmartwatchSheet?>, revision: Binding<Int>) -> some View {
+        let host = resolver.resolve(SmartwatchHost.self)!
+        return self
+            .sheet(item: sheet) { item in
+                SmartwatchViewControllerView { completionDelegate in
+                    switch item {
+                    case let .setup(identifier):
+                        host.setupViewController(for: identifier, completionDelegate: completionDelegate)
+                    case .settings:
+                        host.settingsViewController(completionDelegate: completionDelegate)
+                    }
+                } onComplete: {
+                    sheet.wrappedValue = nil
+                }
+                .ignoresSafeArea()
+                .interactiveDismissDisabled()
+            }
+            .onReceive(host.smartwatchManagerChanged.receive(on: DispatchQueue.main)) { _ in
+                revision.wrappedValue += 1
+            }
     }
 }
 

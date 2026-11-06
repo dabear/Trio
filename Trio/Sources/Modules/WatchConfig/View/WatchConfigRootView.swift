@@ -8,6 +8,8 @@ extension WatchConfig {
 
         @Environment(\.colorScheme) var colorScheme
         @Environment(AppState.self) var appState
+        @State private var smartwatchSheet: SmartwatchSheet?
+        @State private var smartwatchRevision = 0
 
         var body: some View {
             List {
@@ -16,10 +18,13 @@ extension WatchConfig {
                     content: {
                         NavigationLink("Apple Watch", destination: WatchConfigAppleWatchView(resolver: resolver, state: state))
                         NavigationLink("Garmin", destination: WatchConfigGarminView(state: state))
-                        WatchConfigSmartwatchRows(resolver: resolver)
+                        // Rebuilt when a watch is added or removed.
+                        WatchConfigSmartwatchRows(resolver: resolver, sheet: $smartwatchSheet)
+                            .id(smartwatchRevision)
                     }
                 ).listRowBackground(Color.chart)
             }
+            .smartwatchSheets(resolver: resolver, sheet: $smartwatchSheet, revision: $smartwatchRevision)
             .scrollContentBackground(.hidden).background(appState.trioBackgroundColor(for: colorScheme))
             .onAppear(perform: configureView)
             .navigationTitle("Watch")
