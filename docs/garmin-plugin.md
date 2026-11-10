@@ -1,22 +1,22 @@
 # Garmin as a SmartwatchManager plugin, from Trio dev's GarminManager
 
-**Experimental.** Branch `watch-plugins-test`, for testers: Trio PR #1745 (`smartwatch-manager`, the Pebble plugin) plus one commit that moves Garmin into a plugin.
+**Experimental.** Branch `watch-plugins-test`, for testers: Trio PR #1745 (`smartwatch-manager`, the Pebble plugin) plus the changes that move Garmin into a plugin.
 
 The earlier attempt (`experimental/garmin-on-smartwatch-manager`) started from the #1680 command series: a command pipeline with boluses, carbs and presets from the watch, Garmin's own looser limits, about 6,300 changed lines, some of the series' tests failing, never run on a Garmin. This attempt starts from Trio `dev`'s `GarminManager` instead, which only shows data: nothing goes from the watch to Trio.
 
 ## Approach
 
-- One class, `GarminSmartwatchManager` (dev's `BaseGarminManager`, renamed): a `SmartwatchManager` plugin in the host's watch slot. It declares glucose, history, loop status and therapy, and **no remote actions**.
-- It keeps everything Connect IQ from dev: devices, watch apps, settings, throttling, debouncing, sending. Only its data source changes: it builds the Garmin watch state from the host's latest snapshot instead of reading Core Data, files and services itself.
+- One class, `GarminSmartwatchManager` (dev's `BaseGarminManager`, renamed): a `SmartwatchManager` plugin in the host's watch slot. It shows glucose, history, loop status and therapy values, and has **no remote actions**.
+- It keeps everything Connect IQ from dev: devices, watch apps, settings, throttling, debouncing, sending. Only its data source changes: it builds the Garmin watch state from what it reads from the host (the `SmartwatchManagerDelegate` reads, after `hostDataDidChange`) instead of reading Core Data, files and services itself.
 - The host creates it like any watch plugin; there is no separate Garmin service. It gets Trio's services through a resolver the host sets. Garmin Connect's device-selection callback reaches it through the host (`watchHostDidReceiveURL`).
 - Without the plugin added, Garmin gets no data; Trio's Garmin settings say so.
 
-## Differences from dev, all from the host's snapshot
+## Differences from dev, all from what the host returns
 
 - **Temp basal:** the pump's live temp basal (dev sent the last temp basal event without checking its expiry), else the scheduled basal from the determination.
 - **Loop time:** Trio's last loop date, rather than the last enacted determination; still 31 minutes ago when there is none.
 - **Target:** the target the algorithm used, which includes overrides and temp targets; dev sent the scheduled profile target.
-- **Updates:** each new snapshot (sent when a reading or the loop result changes) rather than dev's own Core Data timers.
+- **Updates:** each change the host signals (a reading, the loop result, settings), debounced by the plugin, rather than dev's own Core Data timers.
 
 ## Steps
 
@@ -31,6 +31,8 @@ The earlier attempt (`experimental/garmin-on-smartwatch-manager`) started from t
 
 9. [x] On LoopKit next-dev (Trio #1718 merged in): LoopKit from dabear/LoopKit `trio-next-dev-smartwatch-manager`; the kit keeps only the async `acknowledgeAlert`. Host and kit tests pass.
 10. [x] Removing a watch: Edit (the delete control in each row), long-press → Remove, or swipe; a tester saw the swipe's Delete land on an empty row. In the simulator, Add Garmin Watch goes through a mock Garmin Connect app (no Add Simulated Watch).
+
+11. [x] LoopKit #684's rework (after review): the plugin is a device manager that reads from its host. No snapshot and no capabilities: `GarminWatchState` is built from the delegate's reads (GarminSmartwatchKit `bab3d30`, 12 tests), and the "Garmin Connect is missing" alert is a LoopKit `Alert` through the host, shown at most time-sensitive. LoopKit from dabear/LoopKit `smartwatch-manager-review` (`2b2e5dd5`); the `trio-next-dev-smartwatch-manager` branch of step 9 is no longer used.
 
 ## Left after these steps
 
