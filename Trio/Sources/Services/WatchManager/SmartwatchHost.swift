@@ -227,7 +227,7 @@ final class BaseSmartwatchHost: SmartwatchHost, Injectable {
     }
 
     @MainActor func handle(_ url: URL) -> Bool {
-        smartwatchManager?.watchHostDidReceiveURL(url) ?? false
+        smartwatchManager?.hostDidReceiveURL(url) ?? false
     }
 
     // MARK: - Change signals
