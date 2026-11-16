@@ -103,9 +103,6 @@ final class BaseSmartwatchHost: SmartwatchHost, Injectable {
     private lazy var changeBatch = SmartwatchChangeBatch { [weak self] in self?.smartwatchManager }
     /// Whether a watch bolus is being delivered, so a second one gets `inProgress`.
     @MainActor var isDeliveringWatchBolus = false
-    /// The answers to the plugin's 0 g recommendation read, which it makes after
-    /// every change for its bolus context: logged only when it changes.
-    @MainActor var contextRecommendationLog = ContextRecommendationLog()
     /// Carb entries from the watch that the latest determination may not count yet.
     @MainActor var watchCarbEntries: [WatchCarbEntry] = []
     /// When this host first saw the latest determination: watch carbs stored
@@ -684,15 +681,16 @@ extension BaseSmartwatchHost: SmartwatchManagerDelegate {
 
     /// The low and high Trio's statistics and home screen show glucose against
     /// (not its glucose alarms' thresholds, which are the alarms' own).
-    func smartwatchManagerGlucoseDisplayLimits(_: SmartwatchManager) async -> SmartwatchGlucoseDisplayLimits? {
+    func smartwatchManagerGlucoseDisplayLimits(_: SmartwatchManager) async -> ClosedRange<LoopQuantity>? {
         Self.displayLimits(low: settingsManager.settings.low, high: settingsManager.settings.high)
     }
 
-    static func displayLimits(low: Decimal, high: Decimal) -> SmartwatchGlucoseDisplayLimits? {
-        SmartwatchGlucoseDisplayLimits(
-            low: LoopQuantity(unit: .milligramsPerDeciliter, doubleValue: Double(truncating: low as NSNumber)),
-            high: LoopQuantity(unit: .milligramsPerDeciliter, doubleValue: Double(truncating: high as NSNumber))
-        )
+    static func displayLimits(low: Decimal, high: Decimal) -> ClosedRange<LoopQuantity>? {
+        guard low < high else {
+            return nil
+        }
+        return LoopQuantity(unit: .milligramsPerDeciliter, doubleValue: Double(truncating: low as NSNumber))
+            ... LoopQuantity(unit: .milligramsPerDeciliter, doubleValue: Double(truncating: high as NSNumber))
     }
 
     func smartwatchManagerOverridePresets(_ manager: SmartwatchManager) async -> [TemporaryPreset] {
@@ -854,19 +852,6 @@ final class SmartwatchChangeBatch {
         pending = []
         guard !changes.isEmpty, let manager = manager() else { return }
         manager.hostDataDidChange(changes)
-    }
-}
-
-/// The plugin's 0 g recommendation reads for its bolus context, made after every
-/// change: an answer is logged only when it differs from the last one.
-struct ContextRecommendationLog {
-    private var last: Double?
-
-    /// Whether `units` should be logged; it becomes the last answer.
-    mutating func shouldLog(_ units: Double) -> Bool {
-        guard units != last else { return false }
-        last = units
-        return true
     }
 }
 
