@@ -8,7 +8,7 @@ The earlier attempt (`experimental/garmin-on-smartwatch-manager`) started from t
 
 - One class, `GarminSmartwatchManager` (dev's `BaseGarminManager`, renamed): a `SmartwatchManager` plugin in the host's watch slot. It shows glucose, history, loop status and therapy values, and has **no remote actions**.
 - It keeps everything Connect IQ from dev: devices, watch apps, settings, throttling, debouncing, sending. Only its data source changes: it builds the Garmin watch state from what it reads from the host (the `SmartwatchManagerDelegate` reads, after `hostDataDidChange`) instead of reading Core Data, files and services itself.
-- The host creates it like any watch plugin; there is no separate Garmin service. It gets Trio's services through a resolver the host sets. Garmin Connect's device-selection callback reaches it through the host (`watchHostDidReceiveURL`).
+- The host creates it like any watch plugin; there is no separate Garmin service. It gets Trio's services through a resolver the host sets. Garmin Connect's device-selection callback reaches it through the host (`hostDidReceiveURL`).
 - Without the plugin added, Garmin gets no data; Trio's Garmin settings say so.
 
 ## Differences from dev, all from what the host returns
